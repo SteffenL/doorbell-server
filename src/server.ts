@@ -317,17 +317,27 @@ function createSortableVersion(version: string): string {
     return result;
 }
 
-async function initFirmwareUpdates(db: Knex) {
-    // TODO: async
-    const storedVersions = (await db<FirmwareUpdateTable>(TableNames.FIRMWARE_UPDATE).select("version")).map(t => t.version);
+async function syncFirmwareUpdates(db: Knex) {
+    const trackedVersions = (await db<FirmwareUpdateTable>(TableNames.FIRMWARE_UPDATE).select("version")).map(t => t.version);
+    const getVersions = (path: string): Promise<string[]> => new Promise((resolve, reject) => fs.readdir(path, (err, files) => {
+        if (err) reject(err);
+        else resolve(files);
+    }));
+    const fileExists = (path: string): Promise<boolean> => new Promise((resolve, reject) => fs.stat(path, err => {
+        resolve(!err);
+    }));
     const localUpdatesDir = path.resolve(__dirname, "../public/firmware");
-    for (const version of fs.readdirSync(localUpdatesDir)) {
-        if (!fs.existsSync(path.join(localUpdatesDir, version, "update.bin"))) {
-            console.log(`Firmware update binary for version ${version} was not found on local file system`);
+    const localVersions = await getVersions(localUpdatesDir);
+
+    // Add non-tracked firmware updates
+    for (const version of localVersions) {
+        const updateFilePath = path.join(localUpdatesDir, version, "update.bin");
+        if (!(await fileExists(updateFilePath))) {
+            console.error(`Firmware update binary for version ${version} was not found`);
             continue;
         }
 
-        if (storedVersions.indexOf(version) === -1) {
+        if (trackedVersions.indexOf(version) === -1) {
             console.log(`Adding firmware update ${version} to database.`);
             await db<FirmwareUpdateTable>(TableNames.FIRMWARE_UPDATE).insert({
                 uuid: uuidv4(),
@@ -336,6 +346,13 @@ async function initFirmwareUpdates(db: Knex) {
                 version,
                 sortable_version: createSortableVersion(version)
             });
+        }
+    }
+    // Remove records of missing firmware updates
+    for (const version of trackedVersions) {
+        if (localVersions.indexOf(version) === -1) {
+            console.log(`Removing firmware update ${version} from database.`);
+            await db<FirmwareUpdateTable>(TableNames.FIRMWARE_UPDATE).where({ version }).delete();
         }
     }
 }
@@ -347,8 +364,8 @@ async function initFirmwareUpdates(db: Knex) {
 
     const db = await initDatabase();
     const app = await initWebApp();
-    await initFirmwareUpdates(db);
-    setInterval(() => initFirmwareUpdates(db), 60000);
+    await syncFirmwareUpdates(db);
+    setInterval(() => syncFirmwareUpdates(db), 60000);
     const httpServer = http.createServer(app);
     const httpsServer = https.createServer({
         key: fs.readFileSync(path.resolve(__dirname, "../certs/server.key.pem"), { encoding: "utf8" }),
