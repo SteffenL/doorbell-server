@@ -167,7 +167,9 @@ async function handleHeartbeat(db: Knex, requestData: HeartbeatRequestData): Pro
         firmware_version: requestFirmwareVersion
     });
     const firmwareUpdateQuery = db<FirmwareUpdateTable>(TableNames.FIRMWARE_UPDATE).orderBy("sortable_version", "desc");
-    const firmwareUpdate = await firmwareUpdateQuery.where("sortable_version", ">", createSortableVersion(requestFirmwareVersion)).first();
+    const firmwareUpdate = await firmwareUpdateQuery.where("active", true)
+        .andWhere("sortable_version", ">", createSortableVersion(requestFirmwareVersion))
+        .first();
     const responseData: HeartbeatResponseData = {
         update: (firmwareUpdate ? {
             version: firmwareUpdate.version,
