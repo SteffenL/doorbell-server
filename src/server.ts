@@ -258,13 +258,6 @@ function addWebRoutes(app: express.Express, db: Knex, io: socketIo.Server) {
         res.send();
     }));
 
-    // Kept for backward compatibility
-    app.post("/device", asyncHandler(async (req, res) => {
-        const { token } = req.body;
-        await addMonitor(db, token, ConnectionType.PUSH);
-        res.send();
-    }));
-
     app.post("/ring", asyncHandler(async (req, res) => {
         await handleRing(db, io);
         res.send();
@@ -277,11 +270,6 @@ function addWebRoutes(app: express.Express, db: Knex, io: socketIo.Server) {
     app.post("/heartbeat", asyncHandler(async (req, res) => {
         const responseData = await handleHeartbeat(db, req.body as HeartbeatRequestData);
         sendFlatmap(res, responseData);
-    }));
-
-    // Kept for backward compatibility
-    app.post("/ping", asyncHandler(async (req, res) => {
-        res.send();
     }));
 }
 
