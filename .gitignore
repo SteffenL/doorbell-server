@@ -1,3 +1,5 @@
-dev.sqlite3
+*.tgz
+*.sqlite3
+dist/
+lib/
 node_modules/
-public/firmware/

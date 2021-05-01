@@ -1,3 +1,4 @@
+import { AppConfig, getAppConfig } from "./config";
 import firebase from "firebase-admin";
 import express from "express";
 import asyncHandler from "express-async-handler";
@@ -8,7 +9,6 @@ import { v4 as uuidv4 } from "uuid";
 import socketIo from "socket.io";
 import http from "http";
 import https from "https";
-import knexfile, { EnvironmentName } from "./knexfile";
 import fs from "fs";
 import flatten from "flat";
 
@@ -195,9 +195,8 @@ async function removeMonitor(db: Knex, token: string, connectionType: Connection
         .where({ token, connection_type: connectionType });
 }
 
-async function initDatabase(): Promise<Knex> {
-    const dbConfig = knexfile[process.env.NODE_ENV ? (process.env.NODE_ENV as EnvironmentName) : "production"];
-    const db = knex(dbConfig);
+async function initDatabase(appConfig: AppConfig): Promise<Knex> {
+    const db = knex(appConfig.database.knex);
 
     await db.migrate.latest({
         directory: path.resolve(__dirname, "migrations")
@@ -242,9 +241,9 @@ function flatMapBodyParser(req: express.Request, res: express.Response, next: ex
     next();
 }
 
-async function initWebApp(): Promise<express.Express> {
+async function initWebApp(appConfig: AppConfig): Promise<express.Express> {
     const app = express();
-    app.use(express.static(path.resolve(__dirname, "..", "public")));
+    app.use(express.static(appConfig.publicDir));
     app.use(express.json());
     app.use(express.text({ type: "application/flatmap" }));
     app.use(flatMapBodyParser);
@@ -305,7 +304,7 @@ function createSortableVersion(version: string): string {
     return result;
 }
 
-async function syncFirmwareUpdates(db: Knex) {
+async function syncFirmwareUpdates(db: Knex, appConfig: AppConfig) {
     const trackedVersions = (await db<FirmwareUpdateTable>(TableNames.FIRMWARE_UPDATE).select("version")).map(t => t.version);
     const getVersions = (path: string): Promise<string[]> => new Promise((resolve, reject) => fs.readdir(path, (err, files) => {
         if (err) reject(err);
@@ -314,7 +313,7 @@ async function syncFirmwareUpdates(db: Knex) {
     const fileExists = (path: string): Promise<boolean> => new Promise((resolve, reject) => fs.stat(path, err => {
         resolve(!err);
     }));
-    const localUpdatesDir = path.resolve(__dirname, "../public/firmware");
+    const localUpdatesDir = appConfig.firmwareDir;
     const localVersions = await getVersions(localUpdatesDir);
 
     // Add non-tracked firmware updates
@@ -346,26 +345,28 @@ async function syncFirmwareUpdates(db: Knex) {
 }
 
 (async () => {
+    const appConfig = getAppConfig();
+
     firebase.initializeApp({
-        credential: firebase.credential.cert(path.resolve(__dirname, "../credentials/firebase-service-account.json"))
+        credential: firebase.credential.cert(appConfig.credentials.firebaseServiceAccountPath)
     });
 
-    const db = await initDatabase();
-    const app = await initWebApp();
-    await syncFirmwareUpdates(db);
-    setInterval(() => syncFirmwareUpdates(db), 60000);
+    const db = await initDatabase(appConfig);
+    const app = await initWebApp(appConfig);
+    await syncFirmwareUpdates(db, appConfig);
+    setInterval(() => syncFirmwareUpdates(db, appConfig), 60000);
     const httpServer = http.createServer(app);
     const httpsServer = https.createServer({
-        key: fs.readFileSync(path.resolve(__dirname, "../certs/server.key.pem"), { encoding: "utf8" }),
-        cert: fs.readFileSync(path.resolve(__dirname, "../certs/server.cert.pem"), { encoding: "utf8" })
+        key: fs.readFileSync(appConfig.server.keyPath, { encoding: "utf8" }),
+        cert: fs.readFileSync(appConfig.server.certificatePath, { encoding: "utf8" })
     }, app);
     const io = await initSocketServer(db, httpServer);
     addWebRoutes(app, db, io);
-    httpServer.listen(3000, () => {
+    httpServer.listen(appConfig.server.httpPort, () => {
         const address = httpServer.address() as net.AddressInfo;
         console.log(`Listening on port ${address.port} (HTTP) at ${address.address}.`);
     });
-    httpsServer.listen(3001, () => {
+    httpsServer.listen(appConfig.server.httpsPort, () => {
         const address = httpsServer.address() as net.AddressInfo;
         console.log(`Listening on port ${address.port} (HTTPS) at ${address.address}.`);
     });

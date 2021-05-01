@@ -1,0 +1,8 @@
+Package: doorbell-server
+Version: 1.0
+Section: base
+Priority: optional
+Architecture: all
+Depends: nodejs
+Maintainer: steffenl.sw@gmail.com
+Description: Run Doorbell Server as a service.

@@ -1,0 +1,11 @@
+[Unit]
+Description=Doorbell Server
+Wants=network-online.target
+
+[Service]
+Restart=always
+ExecStart=/usr/bin/node /opt/doorbell-server/server.js
+Environment=CONFIG_DIR=/etc/opt/doorbell-server DATA_DIR=/var/opt/doorbell-server
+
+[Install]
+WantedBy=multi-user.target
