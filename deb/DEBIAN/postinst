@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+
+mkdir /etc/opt/doorbell-server /var/opt/doorbell-server || true

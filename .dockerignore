@@ -1,3 +1,4 @@
 .git/
-node_modules/
+deb-build/
 dist/
+node_modules/

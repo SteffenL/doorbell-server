@@ -2,6 +2,14 @@
 
 ## Building (Linux)
 
+Build Debian package:
+
+```
+scripts/build_deb.sh
+```
+
+## App Config (Linux)
+
 Environment variables:
 
 ```
@@ -9,7 +17,7 @@ CONFIG_DIR=/etc/opt/doorbell-server
 DATA_DIR=/var/opt/doorbell-server
 ```
 
-Config/Data dir defaults to `${HOME}/.doorbell-server`.
+Create the config/data directory if needed. Defaults to `${HOME}/.doorbell-server/config` and `${HOME}/.doorbell-server/data`.
 
 Place files:
 
@@ -17,8 +25,42 @@ Place files:
 * FCM credentials (`firebase-service-account.json`) in `${CONFIG_DIR}/credentials/`.
 * Firmware updates (`update.bin`) in `${CONFIG_DIR}/public/firmware/<version>/`.
 
-Build Debian package:
+Create/Edit app config file at `${CONFIG_DIR}/app.config.json`:
 
+Example #1:
+
+```json
+{
+    "server": {
+        "httpPort": 80,
+        "httpsPort": 443
+    },
+    "database": {
+        "dbms": "sqlite3"
+    }
+}
 ```
-scripts/build_deb.sh
+
+Example #2:
+
+```json
+{
+    "server": {
+        "httpPort": 80,
+        "httpsPort": 443
+    },
+    "database": {
+        "dbms": "mysql",
+        "database": "doorbell-server",
+        "username": "doorbell-server-user",
+        "password": "secret password",
+        "hostname": "localhost",
+        "port": 3306
+    }
+}
 ```
+
+## TODO
+
+* Update server certificates automatically when the files change.
+* Delete records of (disconnected) monitors in the database on startup.

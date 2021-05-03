@@ -3,40 +3,58 @@ import path from "path";
 
 export enum DbmsName {
   SQLITE3 = "sqlite3",
-  POSTGRESQL = "postgresql"
+  POSTGRESQL = "postgresql",
+  MYSQL = "mysql"
 }
 
-export function getKnexConfig(dbms: DbmsName, configDir: string): Knex.Config {
-  switch (dbms) {
+export type DbmsConfig = {
+  dbms: DbmsName,
+  database?: string,
+  username?: string,
+  password?: string,
+  hostname?: string,
+  port?: number
+};
+
+export function getKnexConfig(dbmsConfig: DbmsConfig, dataDir: string): Knex.Config {
+  switch (dbmsConfig.dbms) {
     case DbmsName.SQLITE3:
       return {
-        client: "sqlite3",
+        client: dbmsConfig.dbms,
         connection: {
-          filename: path.join(configDir, "db.sqlite3")
+          filename: path.join(dataDir, "db.sqlite3")
         },
-        useNullAsDefault: false
+        useNullAsDefault: false,
+        migrations: {
+          tableName: "knex_migrations",
+          directory: path.resolve(__dirname, "migrations")
+        }
       };
 
     case DbmsName.POSTGRESQL:
+    case DbmsName.MYSQL:
       return {
-        client: "postgresql",
+        client: dbmsConfig.dbms,
         connection: {
-          database: "my_db",
-          user: "username",
-          password: "password"
+          database: dbmsConfig.database,
+          user: dbmsConfig.username,
+          password: dbmsConfig.password,
+          host: dbmsConfig.hostname,
+          port: dbmsConfig.port
         },
         pool: {
           min: 2,
           max: 10
         },
         migrations: {
-          tableName: "knex_migrations"
+          tableName: "knex_migrations",
+          directory: path.resolve(__dirname, "migrations")
         }
       };
 
     default:
-      throw new Error(`Invalid DBMS name: ${dbms}`);
+      throw new Error(`Invalid DBMS name: ${dbmsConfig.dbms}`);
   }
 }
 
-export default getKnexConfig(DbmsName.SQLITE3, ".");
+export default getKnexConfig({ dbms: DbmsName.SQLITE3 }, ".");

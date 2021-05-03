@@ -5,7 +5,8 @@ Wants=network-online.target
 [Service]
 Restart=always
 ExecStart=/usr/bin/node /opt/doorbell-server/server.js
-Environment=CONFIG_DIR=/etc/opt/doorbell-server DATA_DIR=/var/opt/doorbell-server
+Environment=CONFIG_DIR=/etc/opt/doorbell-server DATA_DIR=/var/opt/doorbell-server NODE_ENV=production
+WorkingDirectory=/opt/doorbell-server/
 
 [Install]
 WantedBy=multi-user.target

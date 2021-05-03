@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "NODE_ENV=development nodemon src/server.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:deb": "bash scripts/build_deb.sh \"${npm_package_name}\" \"${npm_package_version}\""
   },
   "author": "Steffen",
   "license": "UNLICENSED",

@@ -1,14 +1,25 @@
-FROM debian:buster
+FROM --platform=${TARGETPLATFORM} debian:buster
+ARG TARGETPLATFORM
+ARG PACKAGE_NAME
+ARG PACKAGE_VERSION
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -sL https://deb.nodesource.com/setup_14.x | bash -
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    nodejs \
+    nodejs make gcc g++ \
     && rm -rf /var/lib/apt/lists/*
 RUN nodejs --version
 RUN npm --version
 WORKDIR /build
 COPY . .
-COPY docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
-ENTRYPOINT [ "bash", "/usr/local/bin/docker_entrypoint.sh" ]
+RUN mkdir --parent deb/opt/
+RUN npm ci "--target_arch=$(scripts/deb_p2a.sh "${TARGETPLATFORM}")"
+RUN npx tsc
+RUN mkdir --parent deb/opt/doorbell-server/
+RUN mv node_modules/ deb/opt/doorbell-server/
+RUN mv lib/* deb/opt/doorbell-server/
+RUN mkdir --parent dist
+RUN sed "s/ARCH_PLACEHOLDER/$(scripts/deb_p2a.sh "${TARGETPLATFORM}")/" --in-place deb/DEBIAN/control \
+    && rm -f deb/DEBIAN/control.template
+RUN dpkg-deb --build deb/ "dist/${PACKAGE_NAME}_${PACKAGE_VERSION}_$(scripts/deb_p2a.sh "${TARGETPLATFORM}").deb"
