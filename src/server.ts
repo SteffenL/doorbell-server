@@ -309,14 +309,9 @@ function addWebRoutes(app: express.Express, db: Knex, io: socketIo.Server) {
         sendFlatmap(res, responseData);
     }));
 
-    app.get("/device-info", asyncHandler(async (req, res) => {
+    app.get("/device-health", asyncHandler(async (req, res) => {
         const deviceInfo = await getDeviceHealth(db);
-        if (deviceInfo) {
-            res.json(deviceInfo);
-        } else {
-            res.status(404);
-            res.send();
-        }
+        res.json(deviceInfo);
     }));
 }
 
