@@ -315,7 +315,7 @@ function addWebRoutes(app: express.Express, db: Knex, io: socketIo.Server) {
             res.json(deviceInfo);
         } else {
             res.status(404);
-            res.end();
+            res.send();
         }
     }));
 }
