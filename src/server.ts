@@ -49,7 +49,8 @@ enum NotificationType {
 }
 
 enum DoorbellEventName {
-    BUTTON_PRESSED = "button_pressed"
+    BUTTON_PRESSED = "button_pressed",
+    BATTERY_LEVEL = "battery_level"
 }
 
 enum BatteryLevel {
@@ -76,16 +77,22 @@ interface HeartbeatResponseData {
     } | undefined
 }
 
-async function handleRing(db: Knex, io: socketIo.Server): Promise<void> {
+interface DeviceHealthResponseData {
+    batteryLevel: string,
+    batteryVoltage: number,
+    firmwareVersion: string
+}
+
+async function notifyMonitors(eventName: DoorbellEventName, db: Knex, io: socketIo.Server): Promise<void> {
     const monitors = await db<MonitorTable>(TableNames.MONITOR).select("*");
     const pushMonitors = monitors.filter(monitor => monitor.connection_type === ConnectionType.PUSH);
     const socketMonitors = monitors.filter(monitor => monitor.connection_type === ConnectionType.SOCKET);
     const notification = {
         id: uuidv4(),
-        name: DoorbellEventName.BUTTON_PRESSED
+        name: eventName
     };
 
-    console.log("Handling ring", notification, monitors);
+    console.log("Notifying monitors", notification, monitors);
 
     if (pushMonitors.length > 0) {
         const tokens = pushMonitors.map(monitor => monitor.token);
@@ -152,6 +159,36 @@ async function handleRing(db: Knex, io: socketIo.Server): Promise<void> {
             }
         }
     }
+}
+
+async function checkHeartbeatAndNotify(db: Knex, io: socketIo.Server): Promise<void> {
+    const lastDeviceHealth = await db<DeviceHealthTable>(TableNames.DEVICE_HEALTH).orderBy("created_at", "desc").first();
+    if (!lastDeviceHealth) {
+        return;
+    }
+    const batteryLevel = lastDeviceHealth.battery_level;
+    const message = `Battery level: ${batteryLevel}`;
+    await notifyMonitors(DoorbellEventName.BATTERY_LEVEL, db, io);
+}
+
+async function handleRing(db: Knex, io: socketIo.Server): Promise<void> {
+    console.log("Handling ring");
+    await notifyMonitors(DoorbellEventName.BUTTON_PRESSED, db, io);
+}
+
+async function getDeviceHealth(db: Knex): Promise<DeviceHealthResponseData | null> {
+    const lastDeviceHealth: DeviceHealthTable = await db<DeviceHealthTable>(TableNames.DEVICE_HEALTH).orderBy("created_at", "desc").first();
+    if (!lastDeviceHealth) {
+        return null;
+    }
+
+    const deviceHealth: DeviceHealthResponseData = {
+        batteryLevel: lastDeviceHealth.battery_level,
+        batteryVoltage: lastDeviceHealth.battery_voltage,
+        firmwareVersion: lastDeviceHealth.firmware_version
+    };
+
+    return deviceHealth;
 }
 
 function createFirmwareUpdatePath(firmwareUpdate: FirmwareUpdateTable): string {
@@ -268,7 +305,18 @@ function addWebRoutes(app: express.Express, db: Knex, io: socketIo.Server) {
 
     app.post("/heartbeat", asyncHandler(async (req, res) => {
         const responseData = await handleHeartbeat(db, req.body as HeartbeatRequestData);
+        await checkHeartbeatAndNotify(db, io);
         sendFlatmap(res, responseData);
+    }));
+
+    app.get("/device-info", asyncHandler(async (req, res) => {
+        const deviceInfo = await getDeviceHealth(db);
+        if (deviceInfo) {
+            res.json(deviceInfo);
+        } else {
+            res.status(404);
+            res.end();
+        }
     }));
 }
 
