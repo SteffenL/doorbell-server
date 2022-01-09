@@ -49,7 +49,11 @@ enum NotificationType {
 }
 
 enum DoorbellEventName {
-    BUTTON_PRESSED = "button_pressed"
+    BUTTON_PRESSED = "button_pressed",
+    BATTERY_LEVEL_MODERATE = "battery_level_moderate",
+    BATTERY_LEVEL_LOW = "battery_level_low",
+    BATTERY_LEVEL_CRITICAL = "battery_level_critical",
+    DEVICE_GONE = "device_gone"
 }
 
 enum BatteryLevel {
@@ -76,16 +80,22 @@ interface HeartbeatResponseData {
     } | undefined
 }
 
-async function handleRing(db: Knex, io: socketIo.Server): Promise<void> {
+interface DeviceHealthResponseData {
+    batteryLevel: string,
+    batteryVoltage: number,
+    firmwareVersion: string
+}
+
+async function notifyMonitors(eventName: DoorbellEventName, db: Knex, io: socketIo.Server): Promise<void> {
     const monitors = await db<MonitorTable>(TableNames.MONITOR).select("*");
     const pushMonitors = monitors.filter(monitor => monitor.connection_type === ConnectionType.PUSH);
     const socketMonitors = monitors.filter(monitor => monitor.connection_type === ConnectionType.SOCKET);
     const notification = {
         id: uuidv4(),
-        name: DoorbellEventName.BUTTON_PRESSED
+        name: eventName
     };
 
-    console.log("Handling ring", notification, monitors);
+    console.log("Notifying monitors", notification, monitors);
 
     if (pushMonitors.length > 0) {
         const tokens = pushMonitors.map(monitor => monitor.token);
@@ -152,6 +162,26 @@ async function handleRing(db: Knex, io: socketIo.Server): Promise<void> {
             }
         }
     }
+}
+
+async function handleRing(db: Knex, io: socketIo.Server): Promise<void> {
+    console.log("Handling ring");
+    await notifyMonitors(DoorbellEventName.BUTTON_PRESSED, db, io);
+}
+
+async function getDeviceHealth(db: Knex): Promise<DeviceHealthResponseData | null> {
+    const lastDeviceHealth = await db<DeviceHealthTable>(TableNames.DEVICE_HEALTH).orderBy("created_at", "desc").first();
+    if (!lastDeviceHealth) {
+        return null;
+    }
+
+    const deviceHealth: DeviceHealthResponseData = {
+        batteryLevel: lastDeviceHealth.battery_level,
+        batteryVoltage: lastDeviceHealth.battery_voltage,
+        firmwareVersion: lastDeviceHealth.firmware_version
+    };
+
+    return deviceHealth;
 }
 
 function createFirmwareUpdatePath(firmwareUpdate: FirmwareUpdateTable): string {
@@ -268,7 +298,13 @@ function addWebRoutes(app: express.Express, db: Knex, io: socketIo.Server) {
 
     app.post("/heartbeat", asyncHandler(async (req, res) => {
         const responseData = await handleHeartbeat(db, req.body as HeartbeatRequestData);
+        await deviceHealthCheckLoop(db, io);
         sendFlatmap(res, responseData);
+    }));
+
+    app.get("/device-health", asyncHandler(async (req, res) => {
+        const deviceInfo = await getDeviceHealth(db);
+        res.json(deviceInfo);
     }));
 }
 
@@ -304,7 +340,7 @@ function createSortableVersion(version: string): string {
     return result;
 }
 
-async function syncFirmwareUpdates(db: Knex, appConfig: AppConfig) {
+async function syncFirmwareUpdates(db: Knex, appConfig: AppConfig): Promise<void> {
     const trackedVersions = (await db<FirmwareUpdateTable>(TableNames.FIRMWARE_UPDATE).select("version")).map(t => t.version);
     const getVersions = (path: string): Promise<string[]> => new Promise((resolve, reject) => fs.readdir(path, (err, files) => {
         if (err) reject(err);
@@ -344,6 +380,49 @@ async function syncFirmwareUpdates(db: Knex, appConfig: AppConfig) {
     }
 }
 
+// FIXME: put this in the DB
+let lastDeviceHealthGoneCheckNotification = 0;
+let lastDeviceHealthBatteryCheckNotification = 0;
+let lastDeviceHealthBatteryLevel = "";
+
+// TODO: clean up code
+async function deviceHealthCheckLoop(db: Knex, io: socketIo.Server): Promise<void> {
+    const lastDeviceHealth = await db<DeviceHealthTable>(TableNames.DEVICE_HEALTH).orderBy("created_at", "desc").first();
+
+    if (!lastDeviceHealth) {
+        return;
+    }
+
+    const currentTime = new Date().getTime();
+
+    const maxGoneTime = (6 * 60 + 10) * 60 * 1000;
+    const goneTime = Math.abs(currentTime - lastDeviceHealth.created_at);
+    const timeSinceLastGoneNotification = Math.abs(currentTime - lastDeviceHealthGoneCheckNotification);
+    if (goneTime >= maxGoneTime && timeSinceLastGoneNotification >= maxGoneTime) {
+        notifyMonitors(DoorbellEventName.DEVICE_GONE, db, io);
+        lastDeviceHealthGoneCheckNotification = currentTime;
+    }
+
+    const timeSinceLastBatteryNotification = Math.abs(currentTime - lastDeviceHealthBatteryCheckNotification);
+    const batteryLevel = lastDeviceHealth.battery_level;
+    const minDelayBetweenBatteryNotifications = 1 * 60 * 60 * 1000;
+    if (lastDeviceHealthBatteryLevel !== batteryLevel && timeSinceLastBatteryNotification >= minDelayBetweenBatteryNotifications) {
+        switch (batteryLevel) {
+            case BatteryLevel.MODERATE:
+                await notifyMonitors(DoorbellEventName.BATTERY_LEVEL_MODERATE, db, io);
+                break;
+            case BatteryLevel.LOW:
+                await notifyMonitors(DoorbellEventName.BATTERY_LEVEL_LOW, db, io);
+                break;
+            case BatteryLevel.CRITICAL:
+                await notifyMonitors(DoorbellEventName.BATTERY_LEVEL_CRITICAL, db, io);
+                break;
+        }
+        lastDeviceHealthBatteryCheckNotification = currentTime;
+        lastDeviceHealthBatteryLevel = batteryLevel;
+    }
+}
+
 (async () => {
     const appConfig = getAppConfig();
 
@@ -354,7 +433,7 @@ async function syncFirmwareUpdates(db: Knex, appConfig: AppConfig) {
     const db = await initDatabase(appConfig);
     const app = await initWebApp(appConfig);
     await syncFirmwareUpdates(db, appConfig);
-    setInterval(() => syncFirmwareUpdates(db, appConfig), 60000);
+    setInterval(() => syncFirmwareUpdates(db, appConfig), 60000, 3000);
     const httpServer = http.createServer(app);
     const httpsServer = https.createServer({
         key: fs.readFileSync(appConfig.server.keyPath, { encoding: "utf8" }),
@@ -370,4 +449,5 @@ async function syncFirmwareUpdates(db: Knex, appConfig: AppConfig) {
         const address = httpsServer.address() as net.AddressInfo;
         console.log(`Listening on port ${address.port} (HTTPS) at ${address.address}.`);
     });
+    setInterval(() => deviceHealthCheckLoop(db, io), 30000);
 })();
